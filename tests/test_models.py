@@ -7,6 +7,7 @@ import pytest
 import torch
 
 from microseg.config import LossConfig, ModelConfig
+from microseg.data.synthetic import synthetic_field
 from microseg.inference import predict_probabilities
 from microseg.models import CombinedLoss, SoftDiceLoss, UNet, build_loss, build_model
 from microseg.models.unet import count_parameters
@@ -108,6 +109,33 @@ class TestLosses:
             build_loss(LossConfig(class_weights=[1.0, 1.0]), n_classes=3)
 
 
+@pytest.fixture(scope="module")
+def briefly_trained_model():
+    """A tiny U-Net taken just far enough to produce a structured prediction.
+
+    Some properties -- that test-time augmentation *refines* a segmentation
+    rather than replacing it -- are only properties of a model that has learned
+    something. On random weights the output is noise, and any agreement measured
+    against it is luck. Forty steps on one synthetic field is enough for the
+    argmax map to be driven by the image instead of the initialisation, and
+    costs about a second, once for the whole module.
+    """
+    from microseg.data.dataset import instances_to_semantic
+
+    torch.manual_seed(0)
+    image, labels = synthetic_field(shape=(64, 64), n_objects=6, seed=0)
+    inputs = torch.from_numpy(image[None, None].astype(np.float32))
+    target = torch.from_numpy(instances_to_semantic(labels, 2)[None]).long()
+
+    model = build_model(ModelConfig(base_filters=4, depth=2))
+    optimiser = torch.optim.Adam(model.parameters(), lr=0.05)
+    for _ in range(40):
+        optimiser.zero_grad()
+        torch.nn.functional.cross_entropy(model(inputs), target).backward()
+        optimiser.step()
+    return model.eval()
+
+
 class TestInference:
     def test_probabilities_sum_to_one_and_keep_shape(self):
         model = build_model(ModelConfig(base_filters=4, depth=2))
@@ -145,14 +173,21 @@ class TestInference:
         # Undo the rotation on the spatial axes of the (C, H, W) output.
         assert np.allclose(np.rot90(rotated, -1, axes=(1, 2)), direct, atol=1e-5)
 
-    def test_tta_and_plain_inference_agree_on_the_argmax_class(self):
-        """TTA refines a prediction; it must not produce a different segmentation."""
-        model = build_model(ModelConfig(base_filters=4, depth=2))
-        model.eval()
-        image = np.random.default_rng(1).random((32, 32)).astype(np.float32)
-        plain = predict_probabilities(model, image, tta=False).argmax(0)
-        augmented = predict_probabilities(model, image, tta=True).argmax(0)
-        assert (plain == augmented).mean() > 0.5
+    def test_tta_and_plain_inference_agree_on_the_argmax_class(self, briefly_trained_model):
+        """TTA refines a prediction; it must not produce a different segmentation.
+
+        Both halves of the setup here used to be wrong, and the test failed in
+        CI about one run in ten. The model was untrained, so its argmax map was
+        noise and "agreement" was decided by an unseeded initialisation; and the
+        input was uniform random pixels, so nothing in it was in distribution.
+        Measured across random inits that gave 0.43 to 0.99 against a 0.5
+        threshold -- a coin flip dressed as an assertion. A briefly trained
+        model on an actual field stays above 0.92.
+        """
+        image = synthetic_field(shape=(64, 64), n_objects=5, seed=11)[0].astype(np.float32)
+        plain = predict_probabilities(briefly_trained_model, image, tta=False).argmax(0)
+        augmented = predict_probabilities(briefly_trained_model, image, tta=True).argmax(0)
+        assert (plain == augmented).mean() > 0.85
 
 
 class TestCheckpointRoundTrip:

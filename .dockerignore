@@ -1,0 +1,22 @@
+# Keep the build context small: data and weights are mounted, not baked in.
+data/
+outputs/
+weights/
+notebooks/
+assets/
+
+.git/
+.gitignore
+.pytest_cache/
+.ruff_cache/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+*.zip
+*.pth
+*.pt
+*.npz

@@ -1,0 +1,12 @@
+# The working tree is LF throughout. Without this, a Windows checkout rewrites
+# every file to CRLF and the first commit from another machine is a whole-file
+# diff. Binary assets are marked so git never tries to translate them.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.tif binary
+*.tiff binary
+*.pt  binary
+*.pth binary
+*.npz binary

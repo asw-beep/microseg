@@ -1,0 +1,77 @@
+name: unet_cpu
+output_dir: outputs
+seed: 42
+data:
+  root: data/raw/stage1_train
+  processed_root: data/processed
+  val_fraction: 0.15
+  test_fraction: 0.15
+  split_seed: 42
+  tile_size: 256
+  augment: true
+  limit: null
+preprocess:
+  auto_invert: true
+  hot_pixel_correction: true
+  hot_pixel_threshold: 5.0
+  illumination: morphological
+  illumination_radius: 50
+  denoise: median
+  denoise_strength: 1.0
+  contrast: clahe
+  clahe_clip_limit: 2.0
+  clahe_tile_grid: 8
+  gamma: 1.0
+  normalize: percentile
+  percentile_low: 1.0
+  percentile_high: 99.0
+model:
+  name: unet
+  in_channels: 1
+  out_channels: 3
+  base_filters: 16
+  depth: 4
+  dropout: 0.1
+  norm: batch
+  bilinear_upsample: false
+loss:
+  ce_weight: 1.0
+  dice_weight: 1.0
+  class_weights:
+  - 1.0
+  - 1.0
+  - 3.0
+train:
+  epochs: 25
+  batch_size: 8
+  lr: 0.001
+  weight_decay: 1.0e-05
+  optimizer: adamw
+  scheduler: cosine
+  num_workers: 0
+  device: cpu
+  amp: false
+  early_stopping_patience: 8
+  grad_clip: 1.0
+  log_every: 20
+  seed: 42
+postprocess:
+  foreground_threshold: 0.5
+  seed_threshold: 0.5
+  min_object_area: 15
+  min_seed_area: 4
+  fill_holes: true
+  watershed_line: false
+  peak_min_distance: 5
+analysis:
+  compute_texture: true
+  glcm_distances:
+  - 1
+  - 3
+  glcm_angles_deg:
+  - 0.0
+  - 45.0
+  - 90.0
+  - 135.0
+  glcm_levels: 32
+  exclude_border_objects: false

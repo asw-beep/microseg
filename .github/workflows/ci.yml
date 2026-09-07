@@ -1,0 +1,44 @@
+# The suite is hermetic -- every test builds its own synthetic microscopy field,
+# so CI needs no dataset download, no checkpoint and no GPU, and finishes in
+# well under a minute. That is the whole reason the synthetic generator exists.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor declared in pyproject (requires-python >= 3.10) and the
+        # version actually developed against. Testing only one of them lets the
+        # other rot.
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          # CPU wheels only: the CUDA build is ~2.5 GB and buys nothing here.
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+          pip install ruff
+          pip install -e . --no-deps
+
+      - name: Lint
+        run: ruff check src tests scripts app
+
+      - name: Test
+        run: pytest -q

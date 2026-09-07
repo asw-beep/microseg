@@ -1,0 +1,83 @@
+# Main experiment: U-Net on BBBC038 (Data Science Bowl 2018) stage1_train.
+#
+# The 670 annotated images are split 70/15/15.  There is no separate labelled
+# test set on BBBC038 -- stage1_test ships without public masks -- so a held-out
+# slice of stage1_train is the only way to report honest instance metrics.
+name: unet_bbbc038
+output_dir: outputs
+seed: 42
+
+data:
+  root: data/raw/stage1_train
+  processed_root: data/processed
+  val_fraction: 0.15
+  test_fraction: 0.15
+  split_seed: 42
+  tile_size: 256
+  augment: true
+  limit: null
+
+preprocess:
+  # BBBC038 mixes fluorescence with H&E brightfield; without auto_invert the two
+  # modalities have opposite polarity and no single model handles both.
+  auto_invert: true
+  hot_pixel_correction: true
+  hot_pixel_threshold: 5.0
+  illumination: morphological
+  illumination_radius: 50
+  denoise: median
+  denoise_strength: 1.0
+  contrast: clahe
+  clahe_clip_limit: 2.0
+  clahe_tile_grid: 8
+  normalize: percentile
+  percentile_low: 1.0
+  percentile_high: 99.0
+
+model:
+  name: unet
+  in_channels: 1
+  out_channels: 3        # background / interior / boundary
+  base_filters: 32
+  depth: 4
+  dropout: 0.1
+  norm: batch
+  bilinear_upsample: false
+
+loss:
+  ce_weight: 1.0
+  dice_weight: 1.0
+  # Boundary pixels are ~5% of the image but carry all the instance-separation
+  # signal, so they are weighted 3x.
+  class_weights: [1.0, 1.0, 3.0]
+
+train:
+  epochs: 40
+  batch_size: 16
+  lr: 0.001
+  weight_decay: 0.00001
+  optimizer: adamw
+  scheduler: cosine
+  num_workers: 0
+  device: auto
+  amp: true
+  early_stopping_patience: 10
+  grad_clip: 1.0
+  log_every: 20
+  seed: 42
+
+postprocess:
+  foreground_threshold: 0.5
+  seed_threshold: 0.5
+  min_object_area: 15
+  min_seed_area: 4
+  fill_holes: true
+  watershed_line: false
+  peak_min_distance: 5
+
+analysis:
+  compute_texture: true
+  glcm_distances: [1, 3]
+  glcm_angles_deg: [0.0, 45.0, 90.0, 135.0]
+  glcm_levels: 32
+  exclude_border_objects: false

@@ -1,0 +1,32 @@
+# Two services over the same image: the interactive app, and a one-shot runner
+# for training/evaluation jobs.
+#
+#   docker compose up app
+#   docker compose run --rm pipeline python -m microseg.train --config configs/smoke.yaml
+
+services:
+  app:
+    build: .
+    image: microseg:latest
+    ports:
+      - "7860:7860"
+    volumes:
+      # Bind-mounted so a model trained by the `pipeline` service is visible to
+      # the app, and so downloaded data survives a rebuild.
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+      - ./weights:/app/weights
+    environment:
+      - MPLBACKEND=Agg
+
+  pipeline:
+    build: .
+    image: microseg:latest
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+      - ./weights:/app/weights
+    environment:
+      - MPLBACKEND=Agg
+    # Overridden on the command line; this default is a quick health check.
+    command: python -m pytest tests/ -q

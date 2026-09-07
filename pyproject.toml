@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "microseg"
+version = "0.1.0"
+description = "Microscopy image analysis and nuclei/cell instance segmentation pipeline"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "opencv-python>=4.8",
+    "scikit-image>=0.22",
+    "scikit-learn>=1.3",
+    "torch>=2.0",
+    "pandas>=2.0",
+    "matplotlib>=3.7",
+    "tifffile>=2023.7",
+    "PyYAML>=6.0",
+    "tqdm>=4.65",
+]
+
+[project.optional-dependencies]
+# The Gradio front end. Separate so a headless training/eval container stays small.
+app = ["gradio>=4.0"]
+# External comparisons. Both are optional by design: the core pipeline, the
+# tests and the Docker image never import them. Cellpose is pinned below 4.0
+# because its `cpsam` transformer is not CPU-viable -- see requirements-benchmarks.txt.
+benchmarks = ["cellpose>=3.0,<4.0", "segment-anything>=1.0"]
+dev = ["pytest>=7.4", "pytest-cov>=4.1", "ruff>=0.4"]
+
+[project.scripts]
+microseg-train = "microseg.train:main"
+microseg-evaluate = "microseg.evaluate:main"
+microseg-predict = "microseg.predict:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q --strict-markers"
+filterwarnings = [
+    # Our own code must not emit these; third-party deprecations are allowed
+    # through so a dependency upgrade does not break the suite.
+    "error::RuntimeWarning",
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4"]
+ignore = [
+    "E501",  # line length is handled by the formatter
+    "B905",  # zip(strict=) is not available on the minimum supported Python
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E741"]  # single-letter names are fine in short assertions

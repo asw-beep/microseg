@@ -1,0 +1,63 @@
+# Smoke-test config: a full train -> evaluate -> report cycle in a couple of
+# minutes on CPU.  Used by `make smoke` to prove the pipeline is wired together
+# end to end.  It needs the downloaded dataset, so it is a local check -- CI runs
+# the test suite, which is hermetic.  Not intended to produce a usable model.
+name: smoke
+output_dir: outputs
+seed: 0
+
+data:
+  root: data/raw/stage1_train
+  processed_root: data/processed
+  val_fraction: 0.2
+  test_fraction: 0.2
+  split_seed: 0
+  tile_size: 128
+  augment: true
+  limit: 40
+
+preprocess:
+  auto_invert: true
+  hot_pixel_correction: true
+  illumination: morphological
+  illumination_radius: 40
+  denoise: median
+  contrast: clahe
+  normalize: percentile
+
+model:
+  name: unet
+  in_channels: 1
+  out_channels: 3
+  base_filters: 8      # ~0.5M params, trains on CPU
+  depth: 3
+  dropout: 0.0
+  norm: batch
+
+loss:
+  ce_weight: 1.0
+  dice_weight: 1.0
+  class_weights: [1.0, 1.0, 3.0]
+
+train:
+  epochs: 3
+  batch_size: 4
+  lr: 0.002
+  optimizer: adamw
+  scheduler: none
+  num_workers: 0
+  device: cpu
+  amp: false
+  early_stopping_patience: 10
+  log_every: 5
+  seed: 0
+
+postprocess:
+  foreground_threshold: 0.5
+  seed_threshold: 0.5
+  min_object_area: 10
+  min_seed_area: 3
+
+analysis:
+  compute_texture: false   # the slowest stage; off for speed
+  exclude_border_objects: false

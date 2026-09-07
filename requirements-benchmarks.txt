@@ -1,0 +1,18 @@
+# Optional dependencies for the external-method comparisons.
+#
+# Installed separately because they are heavy and the core pipeline, the test
+# suite and the Docker image all run without them -- both benchmark modules
+# detect absence and report a skip rather than failing.
+#
+#   pip install -r requirements-benchmarks.txt
+#
+# SAM additionally needs a checkpoint, which is not bundled (375 MB):
+#   curl -L -o weights/sam_vit_b_01ec64.pth \
+#     https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth
+
+# Pinned below 4.0 deliberately: Cellpose 4 replaced the per-tissue CNNs with the
+# `cpsam` transformer (1.2 GB checkpoint), which failed to segment 3 images in 30
+# minutes on CPU during benchmarking.  Cellpose 3's classic `nuclei` model is
+# 25 MB and runs at ~3.3 s/image on CPU.  See docs/foundation_models.md.
+cellpose>=3.0,<4.0
+segment-anything>=1.0

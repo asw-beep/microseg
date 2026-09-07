@@ -1,0 +1,53 @@
+# Data and model artifacts are reproducible from scripts; they do not belong in git.
+data/raw/
+data/processed/
+outputs/
+weights/
+*.zip
+*.pth
+*.pt
+*.npz
+
+# ...with one deliberate exception: the reference checkpoint. It is 7.8 MB, the
+# README describes it as shipping with the project, and having it in the repo is
+# what lets someone clone, launch the app and get a real segmentation without
+# first spending 32 minutes training. Negation must re-include the directories
+# too -- git will not look inside an excluded directory to find an unexcluded
+# file, so `outputs/` and each level below it are re-admitted first.
+!outputs/
+outputs/*
+!outputs/unet_cpu/
+outputs/unet_cpu/*
+!outputs/unet_cpu/best.pt
+!outputs/unet_cpu/config.yaml
+!outputs/unet_cpu/history.json
+!outputs/unet_cpu/splits.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Local agent/editor tooling. Useful on this machine, noise in the repo.
+.claude/
+.agents/
+skills-lock.json
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

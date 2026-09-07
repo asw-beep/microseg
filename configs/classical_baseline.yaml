@@ -1,0 +1,42 @@
+# Classical CV baseline: no learned model at all.
+#
+# Uses the same preprocessing and the same instance/analysis stages as the U-Net
+# config, so the comparison isolates the segmentation step.  Keeping everything
+# else identical is what makes the resulting numbers a fair baseline rather than
+# a straw man.
+name: classical_baseline
+output_dir: outputs
+seed: 42
+
+data:
+  root: data/raw/stage1_train
+  processed_root: data/processed
+  val_fraction: 0.15
+  test_fraction: 0.15
+  split_seed: 42        # identical to unet_bbbc038.yaml -- same held-out images
+  tile_size: 256
+  augment: false
+
+preprocess:
+  auto_invert: true
+  hot_pixel_correction: true
+  illumination: morphological
+  illumination_radius: 50
+  denoise: median
+  denoise_strength: 1.0
+  contrast: clahe
+  clahe_clip_limit: 2.0
+  normalize: percentile
+
+model:
+  name: unet          # unused by this backend, kept so the config validates
+  in_channels: 1
+  out_channels: 3
+
+postprocess:
+  min_object_area: 15
+  peak_min_distance: 5
+
+analysis:
+  compute_texture: true
+  exclude_border_objects: false

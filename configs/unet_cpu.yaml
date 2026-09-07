@@ -1,0 +1,86 @@
+# CPU-trainable U-Net variant.
+#
+# `unet_bbbc038.yaml` is the reference configuration and assumes a GPU (32 base
+# filters, 40 epochs, batch 16 -- roughly 5.5 minutes per epoch on CPU, which is
+# not practical).  This config trades width for wall-clock so the full training
+# ->  evaluation -> comparison cycle is reproducible on a laptop, and it is what
+# the checkpoint committed with this project was trained with.
+#
+# Differences from the reference config, and what each costs:
+#   base_filters 32 -> 16   ~1.9M params instead of 7.8M; a small accuracy loss,
+#                           mostly on the boundary class.
+#   batch_size   16 -> 8    keeps BatchNorm statistics usable at this size.
+#   epochs       40 -> 25   with cosine decay this is near convergence.
+# Everything else -- preprocessing, loss, post-processing, splits -- is identical,
+# so results remain comparable with the classical baseline.
+name: unet_cpu
+output_dir: outputs
+seed: 42
+
+data:
+  root: data/raw/stage1_train
+  processed_root: data/processed
+  val_fraction: 0.15
+  test_fraction: 0.15
+  split_seed: 42        # same partition as every other config
+  tile_size: 256
+  augment: true
+
+preprocess:
+  auto_invert: true
+  hot_pixel_correction: true
+  hot_pixel_threshold: 5.0
+  illumination: morphological
+  illumination_radius: 50
+  denoise: median
+  denoise_strength: 1.0
+  contrast: clahe
+  clahe_clip_limit: 2.0
+  clahe_tile_grid: 8
+  normalize: percentile
+  percentile_low: 1.0
+  percentile_high: 99.0
+
+model:
+  name: unet
+  in_channels: 1
+  out_channels: 3
+  base_filters: 16
+  depth: 4
+  dropout: 0.1
+  norm: batch
+  bilinear_upsample: false
+
+loss:
+  ce_weight: 1.0
+  dice_weight: 1.0
+  class_weights: [1.0, 1.0, 3.0]
+
+train:
+  epochs: 25
+  batch_size: 8
+  lr: 0.001
+  weight_decay: 0.00001
+  optimizer: adamw
+  scheduler: cosine
+  num_workers: 0
+  device: cpu
+  amp: false            # GradScaler is CUDA-only
+  early_stopping_patience: 8
+  grad_clip: 1.0
+  log_every: 20
+  seed: 42
+
+postprocess:
+  foreground_threshold: 0.5
+  seed_threshold: 0.5
+  min_object_area: 15
+  min_seed_area: 4
+  fill_holes: true
+  peak_min_distance: 5
+
+analysis:
+  compute_texture: true
+  glcm_distances: [1, 3]
+  glcm_levels: 32
+  exclude_border_objects: false

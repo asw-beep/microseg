@@ -142,3 +142,52 @@ That equivalence is pinned by a test.
   inflates scores when one large prediction overlaps two ground-truth objects.
 - Per-image metrics are averaged with equal weight per field rather than pooled
   over pixels, so a 1024x1024 field does not count 16x a 256x256 one.
+
+## Cross-dataset: BBBC039
+
+200 fields of U2OS nuclei, different experiment/cell line/microscope from
+BBBC038. No fine-tuning. First 100 images. Reproduce with
+`python scripts/evaluate_bbbc039.py --limit 100`.
+
+| Method | Dice | IoU | Precision | Recall | F1 | AP | Matched IoU | Count err |
+|---|---|---|---|---|---|---|---|---|
+| Classical | 0.921 | 0.856 | 0.749 | 0.801 | 0.771 | 0.420 | 0.821 | 11.7 |
+| U-Net | 0.934 | 0.877 | 0.749 | 0.793 | 0.762 | 0.446 | 0.836 | 24.5 |
+
+Per-image AP distribution (100 fields):
+
+| Backend | min | 25% | median | 75% | max | sd |
+|---|---|---|---|---|---|---|
+| Classical | 0.072 | 0.359 | 0.433 | 0.488 | 1.000 | 0.117 |
+| U-Net | 0.068 | 0.357 | 0.467 | 0.541 | 1.000 | 0.141 |
+
+Mean nuclei per BBBC039 field: 120 (min 0, max 199). The U-Net's
+count error concentrates in the densest fields -- it merges clusters it was
+never trained at.
+
+## Distance head A/B
+
+One checkpoint (`configs/unet_cpu_distance.yaml`), the BBBC038 test split,
+two decoders. `postprocess.use_distance_seeds` is the only variable.
+
+| Seeding | Dice | Precision | Recall | F1 | AP | Matched IoU | Count err |
+|---|---|---|---|---|---|---|---|
+| Distance | 0.875 | 0.800 | 0.796 | 0.791 | 0.481 | 0.811 | 5.15 |
+| Boundary | 0.875 | 0.818 | 0.788 | 0.796 | 0.488 | 0.813 | 5.08 |
+
+Distance seeding wins on 30 of 100 images, loses on 49, ties on 21.
+
+The head was built for *overlapping* nuclei, so the aggregate could in
+principle hide a win on crowded fields. Stratified by nuclei per field:
+
+| Crowding | Images | Median nuclei | AP distance | AP boundary | Delta |
+|---|---|---|---|---|---|
+| Q1 sparsest | 28 | 12 | 0.470 | 0.476 | -0.006 |
+| Q2 | 25 | 22 | 0.541 | 0.545 | -0.005 |
+| Q3 | 22 | 32 | 0.461 | 0.473 | -0.012 |
+| Q4 densest | 25 | 65 | 0.450 | 0.456 | -0.006 |
+
+The deficit is flat across quartiles and the correlation between field
+crowding and the delta is -0.046 -- no relationship. BBBC038's nuclei
+mostly touch rather than overlap, and touching is what the boundary class
+already handles.

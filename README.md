@@ -75,6 +75,50 @@ distance transform lifts Dice from 0.656 to 0.834 and makes it 7.7x faster,
 which is exactly the hybrid the docs argue for: cheap classical CV for
 detection, foundation model for boundaries.
 
+### Cross-dataset (BBBC039)
+
+The corruption sweep below perturbs held-out BBBC038 images; it is a proxy for
+robustness, not a test of it. This is the test: **[BBBC039](https://bbbc.broadinstitute.org/BBBC039)**
+— 200 fields of U2OS nuclei from a different experiment, cell line, microscope
+and plate. No fine-tuning, no threshold adjustment; the checkpoint has never
+seen a BBBC039 pixel. First 100 images, same metrics as everything above.
+
+| Method | Dice | IoU | Precision | Recall | F1 | **AP** | Matched IoU | Count err |
+|---|---|---|---|---|---|---|---|---|
+| Classical | 0.921 | 0.856 | 0.749 | **0.801** | **0.771** | 0.420 | 0.821 | **11.7** |
+| **U-Net** | **0.934** | **0.877** | 0.749 | 0.793 | 0.762 | **0.446** | **0.836** | 24.5 |
+
+Reproduce with `python scripts/evaluate_bbbc039.py --limit 100`.
+
+**The model transfers; its advantage largely does not.** On BBBC038's own test
+split the U-Net leads the classical baseline 0.478 to 0.369 AP — 30% relative.
+On BBBC039 that shrinks to 0.446 vs 0.420, or 6%. The U-Net gives up little
+(0.478 -> 0.446) while the baseline *gains* (0.369 -> 0.420), because BBBC039 is
+clean, uniform fluorescence where a tuned Otsu does well, whereas BBBC038
+deliberately mixes fluorescence, brightfield and histology. Read honestly: most
+of the learned model's in-dataset margin came from absorbing that heterogeneity,
+not from a better notion of what a nucleus is.
+
+**The transfer failure is crowding, and it is specific.** BBBC039 fields hold
+120 nuclei on average, far more than BBBC038's. The U-Net's count error is more
+than double the baseline's (24.5 vs 11.7 per field) *despite* better pixel Dice
+and better outlines — on the worst field it returns 82 objects where there are
+154. It merges dense clusters: the exact failure the boundary class exists to
+prevent, which evidently does not extend to densities outside its training
+range. Per-image AP runs 0.068 to 1.000 (median 0.467, sd 0.141), so the mean
+hides a wide spread.
+
+Note that pixel Dice (0.934, the best number in the table) would tell you the
+model is doing fine. AP says otherwise. That is the same lesson the in-dataset
+table teaches, reproduced on data the model was never fitted to.
+
+Two properties of BBBC039 have to be handled or the ground truth is wrong, and
+both are in `scripts/evaluate_bbbc039.py`: its masks are **graph-coloured**
+rather than instance-numbered (adjacent nuclei get different small values, so a
+naive `mask > 0` reads 94 objects on the first field where there are 110, and
+flatters any model that under-segments), and its images are **12-bit stored in
+uint16**, which dtype scaling alone leaves at 6% of range.
+
 ### Robustness
 
 Same 25 test images under realistic corruptions, reported as Dice (AP):
@@ -256,8 +300,35 @@ costs one extra convolution — the per-object distance transform it learns from
 is computed by the dataset either way. Because the two seeding routes read the
 same checkpoint, `postprocess.use_distance_seeds: false` evaluates a
 distance-head model through the boundary route instead, which is the controlled
-way to measure what the head actually buys. Off by default; the committed
-checkpoint does not use it.
+way to measure what the head actually buys.
+
+**Measured, it buys nothing on this dataset.** One checkpoint
+(`unet_cpu_distance.yaml`), one test split, two decoders:
+
+| Seeding | Dice | Precision | Recall | F1 | **AP** | Matched IoU | Count err |
+|---|---|---|---|---|---|---|---|
+| Distance | 0.875 | 0.800 | **0.796** | 0.791 | 0.481 | 0.811 | 5.15 |
+| Boundary | 0.875 | **0.818** | 0.788 | **0.796** | **0.488** | **0.813** | **5.08** |
+
+Distance seeding is **0.007 AP worse**, winning on 30 of 100 images and losing
+on 49. The direction of the trade is consistent and explains it: distance
+seeding raises recall (+0.008) and costs more precision (-0.017), i.e. it splits
+nuclei that should have stayed whole.
+
+The obvious rescue is that the head should pay off specifically where nuclei
+*overlap*, so the aggregate would hide it. It does not. Stratified into
+crowding quartiles the deficit is flat (-0.006 / -0.005 / -0.012 / -0.006 AP
+from sparsest to densest), the correlation between field crowding and the
+distance-vs-boundary delta is **-0.046** — no relationship — and on the ten most
+crowded fields (median 102 nuclei) distance seeding is *further* behind at
+-0.017 AP.
+
+The reading is that BBBC038's nuclei mostly **touch** rather than **overlap**,
+and touching is precisely the case the boundary class already handles. The head
+answers a failure mode this dataset barely exhibits. It is kept because it is
+the right mechanism for genuinely overlapping nuclei and costs one convolution
+to carry, it is covered by tests, and it is off by default — but nothing here
+justifies turning it on, and the numbers say so rather than implying otherwise.
 
 ### 4. Quantitative analysis — `src/microseg/analysis/`
 
@@ -480,12 +551,12 @@ Honest about what this is not:
 - **2-D only.** Z-stacks are max-projected. True 3-D morphology needs a 3-D
   U-Net and anisotropic voxel handling throughout.
 - **The boundary-class approach has a failure mode.** When nuclei overlap
-  substantially rather than merely touch, there is no boundary to predict.
-  The optional distance head (`unet_cpu_distance.yaml`) is the built-in answer
-  and is implemented end to end, but no checkpoint has been trained with it yet,
-  so this README quotes no numbers for it — training that run and reporting the
-  A/B against boundary seeding on one checkpoint is the immediate next step.
-  Cellpose-style flow fields still degrade more gracefully than either.
+  substantially rather than merely touch, there is no boundary to predict. The
+  optional distance head is the built-in answer, and it was trained and measured
+  — it is 0.007 AP *worse*, with no advantage on crowded fields either (see
+  above). BBBC038 apparently has too few genuinely overlapping nuclei for the
+  mechanism to matter. Testing that claim needs a dataset where overlap is
+  common; Cellpose-style flow fields remain the stronger answer where it is.
 - **No tracking.** Live-cell assays need nuclei linked across frames; SAM 2's
   video capability is the interesting direction.
 - **CPU-trained reference model.** The committed checkpoint uses the reduced
@@ -497,9 +568,19 @@ Honest about what this is not:
   would mean more training data or a flow-field instance representation, not a
   bigger version of the same model — the boundary class is the limiting design
   choice, not the parameter count.
-- **Single dataset.** Cross-dataset generalisation (train on BBBC038, test on
-  BBBC039 or TNBC) is the test that would actually establish robustness; the
-  corruption sweep is a proxy for it.
+- **Generalisation is real but the *margin* does not transfer.** Tested on 100
+  BBBC039 images with no fine-tuning, the U-Net holds up in absolute terms
+  (AP 0.478 -> 0.446) but its lead over the classical baseline collapses from
+  30% relative to 6%, because the baseline *improves* on BBBC039's cleaner
+  fluorescence (0.369 -> 0.420). Much of the learned model's advantage on
+  BBBC038 was fitting that dataset's modality mix rather than learning a better
+  notion of a nucleus. See [Cross-dataset](#cross-dataset-bbbc039).
+- **Crowding beyond the training range is the transfer failure.** BBBC039
+  fields average 120 nuclei against BBBC038's far sparser ones, and the U-Net's
+  count error doubles the classical baseline's there (24.5 vs 11.7 per field)
+  while still scoring better on pixel Dice. On the worst field it finds 82 of
+  154 nuclei. Training on denser fields, or sampling crops by object density,
+  is the obvious next move.
 
 ## License
 

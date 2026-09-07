@@ -98,6 +98,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--offset", type=int, default=0,
                         help="skip this many images first, for disjoint subsets")
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--device", default="auto",
+                        help="auto|cpu|cuda -- auto picks the GPU when one is present")
+    parser.add_argument("--tag", default=None,
+                        help="name this run in the results (default: the backend). "
+                             "Two checkpoints of the same backend need different "
+                             "tags or their fields pool into one arm.")
     args = parser.parse_args(argv)
 
     setup_logging()
@@ -123,12 +129,13 @@ def main(argv: list[str] | None = None) -> int:
     first, last = args.offset, args.offset + len(samples)
 
     if args.backend == "unet":
-        pipeline = SegmentationPipeline.from_checkpoint(args.checkpoint, device="cpu")
+        pipeline = SegmentationPipeline.from_checkpoint(args.checkpoint, device=args.device)
     else:
         pipeline = SegmentationPipeline(load_config(args.config), backend="classical")
 
-    LOGGER.info("BBBC039: %d images (offset %d), backend %s",
-                len(samples), args.offset, args.backend)
+    tag = args.tag or args.backend
+    LOGGER.info("BBBC039: %d images (offset %d), backend %s, tag %s",
+                len(samples), args.offset, args.backend, tag)
 
     timer = Timer()
     records = []
@@ -154,14 +161,19 @@ def main(argv: list[str] | None = None) -> int:
     df = pd.DataFrame(records)
     summary = aggregate(records)
     summary["n_images"] = len(records)
-    summary["backend"] = pipeline.backend
+    # The tag, not the backend, is what pairs runs together -- two U-Net
+    # checkpoints are both "unet" and must not be pooled.
+    summary["backend"] = tag
+    summary["pipeline_backend"] = pipeline.backend
+    summary["checkpoint"] = str(args.checkpoint) if args.backend == "unet" else None
+    summary["device"] = args.device
     summary["dataset"] = "BBBC039"
     summary["offset"] = args.offset
     summary["first_field"] = first
     summary["last_field"] = last
     summary.update({f"time_{k}": round(v, 4) for k, v in timer.summary().items()})
 
-    default_dir = f"outputs/bbbc039/{args.backend}_f{first}-{last}"
+    default_dir = f"outputs/bbbc039/{tag}_f{first}-{last}"
     out_dir = ensure_dir(args.output_dir or default_dir)
     df.to_csv(out_dir / "per_image_metrics.csv", index=False)
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")

@@ -145,48 +145,62 @@ That equivalence is pinned by a test.
 
 ## Cross-dataset: BBBC039
 
-All 200 fields of U2OS nuclei -- different experiment, cell line, microscope
-and plate from BBBC038. No fine-tuning. See the README for the reproduction
-commands.
+All 200 fields of U2OS nuclei -- a different experiment, cell line, microscope
+and plate from BBBC038. No fine-tuning. See the README for reproduction commands.
 
 | Method | Dice | IoU | Precision | Recall | F1 | AP | Matched IoU | Count err |
 |---|---|---|---|---|---|---|---|---|
 | Classical | 0.924 | 0.861 | 0.762 | 0.815 | 0.785 | 0.433 | 0.819 | 10.8 |
-| U-Net | 0.934 | 0.877 | 0.755 | 0.799 | 0.770 | 0.452 | 0.832 | 22.0 |
+| U-Net 1.9M | 0.934 | 0.877 | 0.755 | 0.799 | 0.770 | 0.452 | 0.832 | 22.0 |
+| U-Net 7.8M | 0.912 | 0.841 | 0.520 | 0.749 | 0.608 | 0.297 | 0.798 | 63.1 |
 
-Both backends see identical fields, so the comparison is paired.
+Both arms see identical fields, so the comparison is paired.
 `scripts/compare_bbbc039.py` reports per-image differences with a bootstrap CI:
 
-| Difference (U-Net - classical) | Mean | Median | 95% CI | U-Net better on |
+| Comparison | Mean AP diff | 95% CI | Wilcoxon p | First better on |
 |---|---|---|---|---|
-| AP | +0.019 | +0.013 | [-0.002, +0.040] | 104 / 200 |
-| F1 | -0.016 | +0.000 | [-0.034, +0.002] | 99 / 200 |
-| Dice | +0.010 | -0.001 | [+0.005, +0.015] | 96 / 200 |
-| Count error | +11.23 | +4.00 | [+8.15, +14.61] | 71 / 200 |
+| U-Net 1.9M - classical | +0.019 | [-0.002, +0.040] | 0.071 | 104 / 200 |
+| U-Net 7.8M - classical | -0.136 | [-0.156, -0.118] | 7e-25 | 32 / 200 |
+| U-Net 7.8M - U-Net 1.9M | -0.155 | [-0.167, -0.144] | 5e-34 | 4 / 200 |
 
-The AP interval includes zero (Wilcoxon p = 0.071); the count-error interval
-does not. The U-Net's only statistically solid win is pixel Dice, which is
-the metric least able to tell these methods apart.
+The 1.9M model's advantage is not distinguishable from zero. The 7.8M model,
+which matches it in-dataset (AP 0.480 vs 0.478), is decisively worse off it.
+
+### Both U-Nets over-segment, and capacity makes it worse
+
+Mean nuclei per field, against a true mean of 118.1:
+
+| Method | Predicted | Signed error |
+|---|---|---|
+| Classical | 126.1 | +8.0 |
+| U-Net 1.9M | 129.7 | +11.6 |
+| U-Net 7.8M | 180.5 | +62.4 |
+
+The direction is over-segmentation, not merging: the 1.9M model over-counts on
+107 of 200 fields, and its signed error is positive in every density quartile
+(+5.7 / +13.1 / +16.0 / +11.9 from sparsest to densest). The boundary head fires
+on out-of-distribution texture and splits nuclei that should stay whole. The 7.8M
+model does the same thing far harder, and worse as density rises:
+
+| Density quartile | Q1 sparsest | Q2 | Q3 | Q4 densest |
+|---|---|---|---|---|
+| U-Net 7.8M signed error | +35.2 | +57.3 | +77.3 | +81.2 |
+
+This is the clearest evidence in the project that capacity is not the limiting
+factor. Four times the parameters changed in-dataset AP by +0.002 and cost 0.155
+AP on transfer.
 
 ### Replication across disjoint wells
 
 The 200 fields split into plate rows A-H and I-P with no shared wells -- and,
-this being a Cell Painting plate, different compound treatments. The result
-holds on both halves independently:
+this being a Cell Painting plate, different compound treatments. The ordering of
+the methods holds on both halves independently:
 
-| Backend | Rows A-H (n=100) | Rows I-P (n=100) |
+| Method | Rows A-H | Rows I-P |
 |---|---|---|
 | Classical | AP 0.420 | AP 0.446 |
-| U-Net | AP 0.446 | AP 0.459 |
-
-Per-image AP distribution over all 200 fields:
-
-| Backend | min | 25% | median | 75% | max | sd |
-|---|---|---|---|---|---|---|
-| Classical | 0.072 | 0.368 | 0.438 | 0.488 | 1.000 | 0.117 |
-| U-Net | 0.068 | 0.353 | 0.467 | 0.547 | 1.000 | 0.144 |
-
-Mean nuclei per field: 118 (min 0, max 231).
+| U-Net 1.9M | AP 0.446 | AP 0.459 |
+| U-Net 7.8M | AP 0.285 | AP 0.309 |
 
 ## Distance head A/B
 

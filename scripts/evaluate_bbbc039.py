@@ -101,10 +101,26 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     setup_logging()
-    samples = pairs(args.limit, args.offset)
-    if not samples:
+    available = pairs(0, 0)
+    if not available:
         LOGGER.error("no BBBC039 data under %s -- download it first", DATA_ROOT)
         return 1
+
+    samples = pairs(args.limit, args.offset)
+    if not samples:
+        # Distinguish "nothing on disk" from "you asked for a range past the end",
+        # which are one typo apart and have completely different fixes.
+        LOGGER.error(
+            "offset %d is past the %d available fields -- nothing to evaluate",
+            args.offset, len(available),
+        )
+        return 1
+
+    # The field range is part of the run's identity, so it goes in the output
+    # directory name rather than just the offset. Keying on backend alone means
+    # a five-image smoke test overwrites a full hundred-image run in place, and
+    # every downstream statistic then changes with no error.
+    first, last = args.offset, args.offset + len(samples)
 
     if args.backend == "unet":
         pipeline = SegmentationPipeline.from_checkpoint(args.checkpoint, device="cpu")
@@ -141,11 +157,11 @@ def main(argv: list[str] | None = None) -> int:
     summary["backend"] = pipeline.backend
     summary["dataset"] = "BBBC039"
     summary["offset"] = args.offset
+    summary["first_field"] = first
+    summary["last_field"] = last
     summary.update({f"time_{k}": round(v, 4) for k, v in timer.summary().items()})
 
-    default_dir = f"outputs/bbbc039/{args.backend}"
-    if args.offset:
-        default_dir += f"_offset{args.offset}"
+    default_dir = f"outputs/bbbc039/{args.backend}_f{first}-{last}"
     out_dir = ensure_dir(args.output_dir or default_dir)
     df.to_csv(out_dir / "per_image_metrics.csv", index=False)
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")

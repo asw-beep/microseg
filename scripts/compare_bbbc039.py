@@ -16,6 +16,7 @@ a paired test cannot separate from zero.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -30,19 +31,53 @@ ROOT = Path("outputs/bbbc039")
 
 
 def load(backend: str) -> pd.DataFrame:
-    """Every evaluated field for one backend, across all offset runs."""
+    """Every evaluated field for one backend, across its range runs.
+
+    Directories are matched on the recorded backend in ``summary.json``, not on
+    the directory name. A prefix glob would fold ``unet_distance`` into ``unet``
+    and quietly report a mixture as one arm -- the directory name is a
+    convenience, the summary is the provenance.
+
+    A field evaluated twice is a conflict, not a duplicate to be dropped
+    silently: it means two runs (possibly two checkpoints) covered the same
+    image, and picking one by directory sort order would be arbitrary. Say so.
+    """
     parts = []
-    for d in sorted(ROOT.glob(f"{backend}*")):
-        csv = d / "per_image_metrics.csv"
-        if csv.exists():
-            parts.append(pd.read_csv(csv))
+    for d in sorted(ROOT.iterdir()):
+        csv, meta = d / "per_image_metrics.csv", d / "summary.json"
+        if not (d.is_dir() and csv.exists() and meta.exists()):
+            continue
+        if json.loads(meta.read_text(encoding="utf-8")).get("backend") != backend:
+            continue
+        frame = pd.read_csv(csv)
+        frame["_run"] = d.name
+        parts.append(frame)
+
     if not parts:
-        raise FileNotFoundError(f"no results for {backend!r} under {ROOT}")
-    return pd.concat(parts, ignore_index=True).drop_duplicates("image_id")
+        raise FileNotFoundError(
+            f"no results for backend {backend!r} under {ROOT} "
+            "(run scripts/evaluate_bbbc039.py first)"
+        )
+
+    combined = pd.concat(parts, ignore_index=True)
+    clashes = combined.image_id[combined.image_id.duplicated()].unique()
+    if len(clashes):
+        runs = sorted(combined[combined.image_id.isin(clashes)]._run.unique())
+        LOGGER.warning(
+            "%d field(s) evaluated more than once for %s across %s -- keeping the "
+            "first and ignoring the rest; delete the stale run to be sure which "
+            "checkpoint these numbers describe",
+            len(clashes), backend, ", ".join(runs),
+        )
+    return combined.drop_duplicates("image_id").drop(columns="_run")
 
 
 def paired_report(values: np.ndarray, name: str, lower_is_better: bool = False,
                   n_boot: int = 10000, seed: int = 0) -> None:
+    if values.size == 0:
+        LOGGER.error("%s: no paired fields to compare", name)
+        return
+
     rng = np.random.default_rng(seed)
     boot = np.array([rng.choice(values, values.size, replace=True).mean() for _ in range(n_boot)])
     lo, hi = np.percentile(boot, [2.5, 97.5])
@@ -63,6 +98,17 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging()
     a, b = load(args.a), load(args.b)
     merged = a.merge(b, on="image_id", suffixes=("_a", "_b"))
+    if merged.empty:
+        # Two arms over disjoint fields join to nothing. Without this the report
+        # is a column of nan, and because `nan <= 0 <= nan` is False the
+        # "includes zero" caveat is omitted too -- a failed run that reads as a
+        # clean result.
+        LOGGER.error(
+            "no field is evaluated by both %s (%d) and %s (%d) -- the runs cover "
+            "disjoint images, so there is nothing to pair",
+            args.a, len(a), args.b, len(b),
+        )
+        return 1
     LOGGER.info("%d fields evaluated by both %s and %s", len(merged), args.a, args.b)
 
     paired_report(np.asarray(merged.ap_mean_a - merged.ap_mean_b), f"AP ({args.a} - {args.b})")

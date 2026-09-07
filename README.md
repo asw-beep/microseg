@@ -89,6 +89,8 @@ pixel. **All 200 fields**, same metrics as everything above.
 | **U-Net** | **0.934** | **0.877** | 0.755 | 0.799 | 0.770 | **0.452** | **0.832** | 22.0 |
 
 ```bash
+# Results land in outputs/bbbc039/<backend>_f<first>-<last>/, so a partial
+# re-run can never overwrite a full one.
 python scripts/evaluate_bbbc039.py --backend unet      --limit 100
 python scripts/evaluate_bbbc039.py --backend unet      --limit 100 --offset 100
 python scripts/evaluate_bbbc039.py --backend classical --limit 100 --config configs/classical_baseline.yaml

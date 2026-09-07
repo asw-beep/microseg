@@ -145,25 +145,48 @@ That equivalence is pinned by a test.
 
 ## Cross-dataset: BBBC039
 
-200 fields of U2OS nuclei, different experiment/cell line/microscope from
-BBBC038. No fine-tuning. First 100 images. Reproduce with
-`python scripts/evaluate_bbbc039.py --limit 100`.
+All 200 fields of U2OS nuclei -- different experiment, cell line, microscope
+and plate from BBBC038. No fine-tuning. See the README for the reproduction
+commands.
 
 | Method | Dice | IoU | Precision | Recall | F1 | AP | Matched IoU | Count err |
 |---|---|---|---|---|---|---|---|---|
-| Classical | 0.921 | 0.856 | 0.749 | 0.801 | 0.771 | 0.420 | 0.821 | 11.7 |
-| U-Net | 0.934 | 0.877 | 0.749 | 0.793 | 0.762 | 0.446 | 0.836 | 24.5 |
+| Classical | 0.924 | 0.861 | 0.762 | 0.815 | 0.785 | 0.433 | 0.819 | 10.8 |
+| U-Net | 0.934 | 0.877 | 0.755 | 0.799 | 0.770 | 0.452 | 0.832 | 22.0 |
 
-Per-image AP distribution (100 fields):
+Both backends see identical fields, so the comparison is paired.
+`scripts/compare_bbbc039.py` reports per-image differences with a bootstrap CI:
+
+| Difference (U-Net - classical) | Mean | Median | 95% CI | U-Net better on |
+|---|---|---|---|---|
+| AP | +0.019 | +0.013 | [-0.002, +0.040] | 104 / 200 |
+| F1 | -0.016 | +0.000 | [-0.034, +0.002] | 99 / 200 |
+| Dice | +0.010 | -0.001 | [+0.005, +0.015] | 96 / 200 |
+| Count error | +11.23 | +4.00 | [+8.15, +14.61] | 71 / 200 |
+
+The AP interval includes zero (Wilcoxon p = 0.071); the count-error interval
+does not. The U-Net's only statistically solid win is pixel Dice, which is
+the metric least able to tell these methods apart.
+
+### Replication across disjoint wells
+
+The 200 fields split into plate rows A-H and I-P with no shared wells -- and,
+this being a Cell Painting plate, different compound treatments. The result
+holds on both halves independently:
+
+| Backend | Rows A-H (n=100) | Rows I-P (n=100) |
+|---|---|---|
+| Classical | AP 0.420 | AP 0.446 |
+| U-Net | AP 0.446 | AP 0.459 |
+
+Per-image AP distribution over all 200 fields:
 
 | Backend | min | 25% | median | 75% | max | sd |
 |---|---|---|---|---|---|---|
-| Classical | 0.072 | 0.359 | 0.433 | 0.488 | 1.000 | 0.117 |
-| U-Net | 0.068 | 0.357 | 0.467 | 0.541 | 1.000 | 0.141 |
+| Classical | 0.072 | 0.368 | 0.438 | 0.488 | 1.000 | 0.117 |
+| U-Net | 0.068 | 0.353 | 0.467 | 0.547 | 1.000 | 0.144 |
 
-Mean nuclei per BBBC039 field: 120 (min 0, max 199). The U-Net's
-count error concentrates in the densest fields -- it merges clusters it was
-never trained at.
+Mean nuclei per field: 118 (min 0, max 231).
 
 ## Distance head A/B
 

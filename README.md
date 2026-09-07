@@ -79,38 +79,65 @@ detection, foundation model for boundaries.
 
 The corruption sweep below perturbs held-out BBBC038 images; it is a proxy for
 robustness, not a test of it. This is the test: **[BBBC039](https://bbbc.broadinstitute.org/BBBC039)**
-— 200 fields of U2OS nuclei from a different experiment, cell line, microscope
-and plate. No fine-tuning, no threshold adjustment; the checkpoint has never
-seen a BBBC039 pixel. First 100 images, same metrics as everything above.
+— U2OS nuclei from a different experiment, cell line, microscope and plate. No
+fine-tuning, no threshold adjustment; the checkpoint has never seen a BBBC039
+pixel. **All 200 fields**, same metrics as everything above.
 
 | Method | Dice | IoU | Precision | Recall | F1 | **AP** | Matched IoU | Count err |
 |---|---|---|---|---|---|---|---|---|
-| Classical | 0.921 | 0.856 | 0.749 | **0.801** | **0.771** | 0.420 | 0.821 | **11.7** |
-| **U-Net** | **0.934** | **0.877** | 0.749 | 0.793 | 0.762 | **0.446** | **0.836** | 24.5 |
+| Classical | 0.924 | 0.861 | **0.762** | **0.815** | **0.785** | 0.433 | 0.819 | **10.8** |
+| **U-Net** | **0.934** | **0.877** | 0.755 | 0.799 | 0.770 | **0.452** | **0.832** | 22.0 |
 
-Reproduce with `python scripts/evaluate_bbbc039.py --limit 100`.
+```bash
+python scripts/evaluate_bbbc039.py --backend unet      --limit 100
+python scripts/evaluate_bbbc039.py --backend unet      --limit 100 --offset 100
+python scripts/evaluate_bbbc039.py --backend classical --limit 100 --config configs/classical_baseline.yaml
+python scripts/evaluate_bbbc039.py --backend classical --limit 100 --offset 100 --config configs/classical_baseline.yaml
+python scripts/compare_bbbc039.py   # paired stats over all 200
+```
 
-**The model transfers; its advantage largely does not.** On BBBC038's own test
-split the U-Net leads the classical baseline 0.478 to 0.369 AP — 30% relative.
-On BBBC039 that shrinks to 0.446 vs 0.420, or 6%. The U-Net gives up little
-(0.478 -> 0.446) while the baseline *gains* (0.369 -> 0.420), because BBBC039 is
-clean, uniform fluorescence where a tuned Otsu does well, whereas BBBC038
-deliberately mixes fluorescence, brightfield and histology. Read honestly: most
-of the learned model's in-dataset margin came from absorbing that heterogeneity,
-not from a better notion of what a nucleus is.
+**The model transfers. Its advantage does not survive the trip.** On BBBC038's
+own test split the U-Net leads the classical baseline 0.478 to 0.369 AP — a 30%
+relative gap. On BBBC039 the gap is 0.452 vs 0.433, **+4.4% relative**, and
+because both backends see the same fields the honest test is paired:
 
-**The transfer failure is crowding, and it is specific.** BBBC039 fields hold
-120 nuclei on average, far more than BBBC038's. The U-Net's count error is more
-than double the baseline's (24.5 vs 11.7 per field) *despite* better pixel Dice
-and better outlines — on the worst field it returns 82 objects where there are
-154. It merges dense clusters: the exact failure the boundary class exists to
-prevent, which evidently does not extend to densities outside its training
-range. Per-image AP runs 0.068 to 1.000 (median 0.467, sd 0.141), so the mean
-hides a wide spread.
+| Paired difference (U-Net − classical), 200 fields | Mean | 95% CI | U-Net better on |
+|---|---|---|---|
+| **AP** | +0.019 | **[−0.002, +0.040]** | 104 / 200 |
+| F1 | −0.016 | [−0.034, +0.002] | 99 / 200 |
+| Dice | +0.010 | [+0.005, +0.015] | 96 / 200 |
+| Count error (lower better) | **+11.2** | **[+8.1, +14.6]** | 71 / 200 |
 
-Note that pixel Dice (0.934, the best number in the table) would tell you the
-model is doing fine. AP says otherwise. That is the same lesson the in-dataset
-table teaches, reproduced on data the model was never fitted to.
+**The AP advantage is not distinguishable from zero** — the confidence interval
+spans it, Wilcoxon gives p = 0.071, and the U-Net wins on 104 fields out of 200,
+which is close to a coin toss. The count error, by contrast, is decisively
+*worse*: **+11.2 nuclei per field**, well clear of zero, and worse on 121 of
+200 fields against better on 71.
+For the number a biologist actually reads first, the classical baseline is the
+better tool on this dataset.
+
+Neither result is noise from a lucky subset. The 200 fields split into two
+well-disjoint halves — plate rows A–H and I–P, no shared wells, and since this
+is a Cell Painting plate, different compound treatments — and the finding
+replicates on both (U-Net AP 0.446 then 0.459; classical 0.420 then 0.446).
+
+The reading: BBBC038 mixes fluorescence, brightfield and histology, and most of
+what the U-Net learned was how to absorb that heterogeneity. BBBC039 is clean
+uniform fluorescence, where a tuned Otsu is already close to the ceiling. The
+learned model is not carrying a better notion of what a nucleus is — it was
+carrying a better notion of *this dataset*.
+
+**Where it actually breaks is crowding.** BBBC039 fields hold 120 nuclei on
+average against BBBC038's far sparser ones. The U-Net merges dense clusters: on
+the worst field it returns 82 objects where there are 154. That is the exact
+failure the boundary class exists to prevent, and it does not extend to
+densities outside its training range. Per-image AP runs 0.068 to 1.000, so the
+mean hides a wide spread.
+
+Note that pixel Dice — 0.934, the U-Net's best number and its only
+*statistically solid* win — would tell you the model is doing fine. AP says it
+is even; count error says it is worse. Same lesson the in-dataset table teaches,
+reproduced on data the model was never fitted to.
 
 Two properties of BBBC039 have to be handled or the ground truth is wrong, and
 both are in `scripts/evaluate_bbbc039.py`: its masks are **graph-coloured**
@@ -568,19 +595,18 @@ Honest about what this is not:
   would mean more training data or a flow-field instance representation, not a
   bigger version of the same model — the boundary class is the limiting design
   choice, not the parameter count.
-- **Generalisation is real but the *margin* does not transfer.** Tested on 100
-  BBBC039 images with no fine-tuning, the U-Net holds up in absolute terms
-  (AP 0.478 -> 0.446) but its lead over the classical baseline collapses from
-  30% relative to 6%, because the baseline *improves* on BBBC039's cleaner
-  fluorescence (0.369 -> 0.420). Much of the learned model's advantage on
-  BBBC038 was fitting that dataset's modality mix rather than learning a better
-  notion of a nucleus. See [Cross-dataset](#cross-dataset-bbbc039).
-- **Crowding beyond the training range is the transfer failure.** BBBC039
-  fields average 120 nuclei against BBBC038's far sparser ones, and the U-Net's
-  count error doubles the classical baseline's there (24.5 vs 11.7 per field)
-  while still scoring better on pixel Dice. On the worst field it finds 82 of
-  154 nuclei. Training on denser fields, or sampling crops by object density,
-  is the obvious next move.
+- **The learned model's advantage does not generalise.** On all 200 BBBC039
+  fields with no fine-tuning, the U-Net's AP lead over the classical baseline
+  is +0.019 with a 95% CI of [-0.002, +0.040] — indistinguishable from zero,
+  where in-dataset it was +0.109. Most of what it learned was BBBC038's
+  modality mix, not a better notion of a nucleus. See
+  [Cross-dataset](#cross-dataset-bbbc039).
+- **On BBBC039 it counts *worse* than the classical baseline**, by +11.2 nuclei
+  per field (95% CI [+8.1, +14.6]), because it merges dense clusters: those
+  fields average 120 nuclei against BBBC038's far sparser ones, and on the worst
+  it finds 82 of 154. Training on denser fields, or sampling crops by object
+  density, is the obvious next move — and until then the honest recommendation
+  for a clean high-density fluorescence assay is the classical backend.
 
 ## License
 

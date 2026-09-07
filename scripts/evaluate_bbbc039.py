@@ -70,15 +70,22 @@ def decode_instances(mask_path: Path) -> np.ndarray:
     return instances
 
 
-def pairs(limit: int) -> list[tuple[Path, Path]]:
-    """Matched (image, mask) paths, skipping the __MACOSX junk in the archive."""
+def pairs(limit: int, offset: int = 0) -> list[tuple[Path, Path]]:
+    """Matched (image, mask) paths, skipping the __MACOSX junk in the archive.
+
+    ``offset`` exists so the set can be split into disjoint halves and the
+    second used to check that a result from the first replicates. The ordering
+    is filename order, which is plate/well order -- arbitrary with respect to
+    anything the model cares about, but not random, so a subset is a convenience
+    rather than a sample.
+    """
     images = sorted(p for p in (DATA_ROOT / "images").iterdir() if p.suffix == ".tif")
     out = []
     for image_path in images:
         mask_path = DATA_ROOT / "masks" / f"{image_path.stem}.png"
         if mask_path.exists():
             out.append((image_path, mask_path))
-    return out[:limit]
+    return out[offset : offset + limit] if limit else out[offset:]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -86,12 +93,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", default="configs/unet_cpu.yaml")
     parser.add_argument("--checkpoint", default="outputs/unet_cpu/best.pt")
     parser.add_argument("--backend", default="unet", choices=["unet", "classical"])
-    parser.add_argument("--limit", type=int, default=100)
+    parser.add_argument("--limit", type=int, default=100,
+                        help="how many images to evaluate; 0 for all remaining")
+    parser.add_argument("--offset", type=int, default=0,
+                        help="skip this many images first, for disjoint subsets")
     parser.add_argument("--output-dir", default=None)
     args = parser.parse_args(argv)
 
     setup_logging()
-    samples = pairs(args.limit)
+    samples = pairs(args.limit, args.offset)
     if not samples:
         LOGGER.error("no BBBC039 data under %s -- download it first", DATA_ROOT)
         return 1
@@ -101,7 +111,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         pipeline = SegmentationPipeline(load_config(args.config), backend="classical")
 
-    LOGGER.info("BBBC039: %d images, backend %s", len(samples), args.backend)
+    LOGGER.info("BBBC039: %d images (offset %d), backend %s",
+                len(samples), args.offset, args.backend)
 
     timer = Timer()
     records = []
@@ -129,9 +140,13 @@ def main(argv: list[str] | None = None) -> int:
     summary["n_images"] = len(records)
     summary["backend"] = pipeline.backend
     summary["dataset"] = "BBBC039"
+    summary["offset"] = args.offset
     summary.update({f"time_{k}": round(v, 4) for k, v in timer.summary().items()})
 
-    out_dir = ensure_dir(args.output_dir or f"outputs/bbbc039/{args.backend}")
+    default_dir = f"outputs/bbbc039/{args.backend}"
+    if args.offset:
+        default_dir += f"_offset{args.offset}"
+    out_dir = ensure_dir(args.output_dir or default_dir)
     df.to_csv(out_dir / "per_image_metrics.csv", index=False)
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
